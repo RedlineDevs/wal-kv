@@ -3,3 +3,6 @@ name = "wal-kv"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+crc32fast = "1.5.0"
+
