@@ -1,3 +1,4 @@
+[![Rust CI](https://github.com/RedlineDevs/wal-kv/actions/workflows/rust.yml/badge.svg)](https://github.com/RedlineDevs/wal-kv/actions/workflows/rust.yml)
 
 # wal-kv
 
