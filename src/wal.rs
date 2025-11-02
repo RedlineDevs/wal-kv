@@ -1,5 +1,5 @@
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::path::Path;
 use crc32fast::Hasher;
 
@@ -110,6 +110,66 @@ impl WriteAheadLog {
         self.file.write_all(&serialized)?;
         self.file.sync_data()?; // Ensure durability
         Ok(())
+    }
+}
+
+pub struct LogIterator {
+    reader: BufReader<File>,
+}
+
+impl LogIterator {
+    pub fn new(path: &Path) -> io::Result<Self> {
+        let file = File::open(path)?;
+        Ok(LogIterator {
+            reader: BufReader::new(file),
+        })
+    }
+}
+
+impl Iterator for LogIterator {
+    type Item = LogRecord;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut header = [0u8; 20];
+        
+        if self.reader.read_exact(&mut header).is_err() {
+            return None;
+        }
+
+        let stored_crc = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+        let key_len_bytes = [
+            header[4], header[5], header[6], header[7],
+            header[8], header[9], header[10], header[11],
+        ];
+        let value_len_bytes = [
+            header[12], header[13], header[14], header[15],
+            header[16], header[17], header[18], header[19],
+        ];
+        
+        let key_len = u64::from_le_bytes(key_len_bytes) as usize;
+        let value_len = u64::from_le_bytes(value_len_bytes) as usize;
+        let data_len = key_len + value_len;
+
+        let mut data = vec![0u8; data_len];
+        
+        if self.reader.read_exact(&mut data).is_err() {
+            return None;
+        }
+        
+        let mut hasher = Hasher::new();
+        hasher.update(&key_len_bytes);
+        hasher.update(&value_len_bytes);
+        hasher.update(&data);
+        let calculated_crc = hasher.finalize();
+
+        if stored_crc != calculated_crc {
+            return None;
+        }
+
+        let key = data[..key_len].to_vec();
+        let value = data[key_len..].to_vec();
+        
+        Some(LogRecord { key, value })
     }
 }
 

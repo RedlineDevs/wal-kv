@@ -2,7 +2,7 @@ mod wal;
 
 use std::fs;
 use std::path::Path;
-use wal::{LogRecord, WriteAheadLog, serialize, deserialize};
+use wal::{LogRecord, WriteAheadLog, LogIterator};
 
 fn main() {
     let _ = fs::remove_file("db.log");
@@ -21,26 +21,28 @@ fn main() {
     };
     wal.append(&record2).expect("Failed to append record2");
     
+    let record3 = LogRecord {
+        key: b"key3".to_vec(),
+        value: b"value3".to_vec(),
+    };
+    wal.append(&record3).expect("Failed to append record3");
+    
     drop(wal);
     
-    let raw_bytes = fs::read("db.log").expect("Failed to read db.log");
-    println!("File size: {} bytes", raw_bytes.len());
+    let iterator = LogIterator::new(Path::new("db.log")).expect("Failed to create iterator");
+    let mut count = 0;
     
-    let record1_serialized = serialize(&record1);
-    let first_record_len = record1_serialized.len();
+    for record in iterator {
+        count += 1;
+        println!(
+            "Record {}: key={:?}, value={:?}",
+            count,
+            String::from_utf8_lossy(&record.key),
+            String::from_utf8_lossy(&record.value)
+        );
+    }
     
-    let deserialized1 = deserialize(&raw_bytes[..first_record_len]).expect("Failed to deserialize record1");
-    println!(
-        "Record 1: key={:?}, value={:?}",
-        String::from_utf8_lossy(&deserialized1.key),
-        String::from_utf8_lossy(&deserialized1.value)
-    );
-    
-    let deserialized2 = deserialize(&raw_bytes[first_record_len..]).expect("Failed to deserialize record2");
-    println!(
-        "Record 2: key={:?}, value={:?}",
-        String::from_utf8_lossy(&deserialized2.key),
-        String::from_utf8_lossy(&deserialized2.value)
-    );
+    assert_eq!(count, 3);
+    println!("Successfully read {} records", count);
 }
 
