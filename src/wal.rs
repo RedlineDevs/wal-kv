@@ -1,3 +1,6 @@
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::Path;
 use crc32fast::Hasher;
 
 #[derive(Debug)]
@@ -86,6 +89,28 @@ pub fn deserialize(bytes: &[u8]) -> Result<LogRecord, String> {
     }
     
     Ok(LogRecord { key, value })
+}
+
+pub struct WriteAheadLog {
+    file: File,
+}
+
+impl WriteAheadLog {
+    pub fn new(path: &Path) -> io::Result<Self> {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        
+        Ok(WriteAheadLog { file })
+    }
+
+    pub fn append(&mut self, record: &LogRecord) -> io::Result<()> {
+        let serialized = serialize(record);
+        self.file.write_all(&serialized)?;
+        self.file.sync_data()?; // Ensure durability
+        Ok(())
+    }
 }
 
 #[cfg(test)]
