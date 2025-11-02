@@ -101,3 +101,73 @@ impl KVStore {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_set_and_get() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path();
+        
+        let mut store = KVStore::open(path).unwrap();
+        
+        store.set(b"key1".to_vec(), b"value1".to_vec()).unwrap();
+        
+        assert_eq!(store.get(b"key1"), Some(&b"value1".to_vec()));
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn test_recovery() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path();
+        
+        {
+            let mut store = KVStore::open(path).unwrap();
+            store.set(b"key1".to_vec(), b"value1".to_vec()).unwrap();
+            store.set(b"key2".to_vec(), b"value2".to_vec()).unwrap();
+            store.set(b"key1".to_vec(), b"value1_updated".to_vec()).unwrap();
+        }
+        
+        let recovered_store = KVStore::open(path).unwrap();
+        
+        assert_eq!(recovered_store.len(), 2);
+        assert_eq!(recovered_store.get(b"key1"), Some(&b"value1_updated".to_vec()));
+        assert_eq!(recovered_store.get(b"key2"), Some(&b"value2".to_vec()));
+    }
+
+    #[test]
+    fn test_compaction() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path();
+        
+        let mut store = KVStore::open(path).unwrap();
+        
+        store.set(b"test_key".to_vec(), b"initial_value".to_vec()).unwrap();
+        
+        for i in 0..100 {
+            let value = format!("value_{}", i).into_bytes();
+            store.set(b"test_key".to_vec(), value).unwrap();
+        }
+        
+        let size_before = fs::metadata(path).unwrap().len();
+        
+        store.compact().unwrap();
+        
+        let size_after = fs::metadata(path).unwrap().len();
+        
+        assert!(size_after < size_before, "Compaction should reduce file size");
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.get(b"test_key"), Some(&b"value_99".to_vec()));
+        
+        drop(store);
+        
+        let final_store = KVStore::open(path).unwrap();
+        assert_eq!(final_store.len(), 1);
+        assert_eq!(final_store.get(b"test_key"), Some(&b"value_99".to_vec()));
+    }
+}
+
