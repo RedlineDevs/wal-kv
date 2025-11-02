@@ -1,48 +1,32 @@
+mod kv;
 mod wal;
 
 use std::fs;
 use std::path::Path;
-use wal::{LogRecord, WriteAheadLog, LogIterator};
 
 fn main() {
     let _ = fs::remove_file("db.log");
     
-    let mut wal = WriteAheadLog::new(Path::new("db.log")).expect("Failed to create WAL");
+    let mut store = kv::KVStore::open(Path::new("db.log")).expect("Failed to open store");
     
-    let record1 = LogRecord {
-        key: b"key1".to_vec(),
-        value: b"value1".to_vec(),
-    };
-    wal.append(&record1).expect("Failed to append record1");
+    store.set(b"key1".to_vec(), b"value1".to_vec()).expect("Failed to set key1");
+    store.set(b"key2".to_vec(), b"value2".to_vec()).expect("Failed to set key2");
+    store.set(b"key1".to_vec(), b"value1_updated".to_vec()).expect("Failed to update key1");
     
-    let record2 = LogRecord {
-        key: b"key2".to_vec(),
-        value: b"value2".to_vec(),
-    };
-    wal.append(&record2).expect("Failed to append record2");
+    assert_eq!(store.len(), 2);
+    assert_eq!(store.get(b"key1" as &[u8]), Some(&b"value1_updated".to_vec()));
+    assert_eq!(store.get(b"key2" as &[u8]), Some(&b"value2".to_vec()));
     
-    let record3 = LogRecord {
-        key: b"key3".to_vec(),
-        value: b"value3".to_vec(),
-    };
-    wal.append(&record3).expect("Failed to append record3");
+    println!("Set {} entries", store.len());
     
-    drop(wal);
+    drop(store);
     
-    let iterator = LogIterator::new(Path::new("db.log")).expect("Failed to create iterator");
-    let mut count = 0;
+    let recovered_store = kv::KVStore::open(Path::new("db.log")).expect("Failed to reopen store");
     
-    for record in iterator {
-        count += 1;
-        println!(
-            "Record {}: key={:?}, value={:?}",
-            count,
-            String::from_utf8_lossy(&record.key),
-            String::from_utf8_lossy(&record.value)
-        );
-    }
+    assert_eq!(recovered_store.len(), 2);
+    assert_eq!(recovered_store.get(b"key1" as &[u8]), Some(&b"value1_updated".to_vec()));
+    assert_eq!(recovered_store.get(b"key2" as &[u8]), Some(&b"value2".to_vec()));
     
-    assert_eq!(count, 3);
-    println!("Successfully read {} records", count);
+    println!("Recovered {} entries after restart", recovered_store.len());
 }
 

@@ -1,6 +1,5 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, BufReader, Read, Write};
-use std::path::Path;
 use crc32fast::Hasher;
 
 #[derive(Debug)]
@@ -32,77 +31,13 @@ pub fn serialize(record: &LogRecord) -> Vec<u8> {
     result
 }
 
-pub fn deserialize(bytes: &[u8]) -> Result<LogRecord, String> {
-    // Minimum size: CRC32 (4) + Key Length (8) + Value Length (8) = 20 bytes
-    if bytes.len() < 20 {
-        return Err("Not enough bytes for header".to_string());
-    }
-    
-    // Read CRC32 (first 4 bytes)
-    let stored_crc = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-    
-    // Read key length (next 8 bytes)
-    let key_len = u64::from_le_bytes([
-        bytes[4], bytes[5], bytes[6], bytes[7],
-        bytes[8], bytes[9], bytes[10], bytes[11],
-    ]);
-    
-    // Read value length (next 8 bytes)
-    let value_len = u64::from_le_bytes([
-        bytes[12], bytes[13], bytes[14], bytes[15],
-        bytes[16], bytes[17], bytes[18], bytes[19],
-    ]);
-    
-    // Check if we have enough bytes for key and value
-    let data_start = 20;
-    let required_len = data_start + (key_len as usize) + (value_len as usize);
-    if bytes.len() < required_len {
-        return Err(format!(
-            "Not enough bytes: need {}, have {}",
-            required_len,
-            bytes.len()
-        ));
-    }
-    
-    // Extract key and value
-    let key_start = data_start;
-    let key_end = key_start + (key_len as usize);
-    let value_start = key_end;
-    let value_end = value_start + (value_len as usize);
-    
-    let key = bytes[key_start..key_end].to_vec();
-    let value = bytes[value_start..value_end].to_vec();
-    
-    // Verify CRC32
-    let mut hasher = Hasher::new();
-    hasher.update(&key_len.to_le_bytes());
-    hasher.update(&value_len.to_le_bytes());
-    hasher.update(&key);
-    hasher.update(&value);
-    let calculated_crc = hasher.finalize();
-    
-    if stored_crc != calculated_crc {
-        return Err(format!(
-            "CRC mismatch: stored {}, calculated {}",
-            stored_crc, calculated_crc
-        ));
-    }
-    
-    Ok(LogRecord { key, value })
-}
-
 pub struct WriteAheadLog {
     file: File,
 }
 
 impl WriteAheadLog {
-    pub fn new(path: &Path) -> io::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        
-        Ok(WriteAheadLog { file })
+    pub fn new(file: File) -> Self {
+        WriteAheadLog { file }
     }
 
     pub fn append(&mut self, record: &LogRecord) -> io::Result<()> {
@@ -118,11 +53,8 @@ pub struct LogIterator {
 }
 
 impl LogIterator {
-    pub fn new(path: &Path) -> io::Result<Self> {
-        let file = File::open(path)?;
-        Ok(LogIterator {
-            reader: BufReader::new(file),
-        })
+    pub fn new(reader: BufReader<File>) -> Self {
+        LogIterator { reader }
     }
 }
 
@@ -177,6 +109,58 @@ impl Iterator for LogIterator {
 mod tests {
     use super::*;
     use crc32fast::Hasher;
+
+    fn deserialize(bytes: &[u8]) -> Result<LogRecord, String> {
+        if bytes.len() < 20 {
+            return Err("Not enough bytes for header".to_string());
+        }
+        
+        let stored_crc = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        
+        let key_len = u64::from_le_bytes([
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+        ]);
+        
+        let value_len = u64::from_le_bytes([
+            bytes[12], bytes[13], bytes[14], bytes[15],
+            bytes[16], bytes[17], bytes[18], bytes[19],
+        ]);
+        
+        let data_start = 20;
+        let required_len = data_start + (key_len as usize) + (value_len as usize);
+        if bytes.len() < required_len {
+            return Err(format!(
+                "Not enough bytes: need {}, have {}",
+                required_len,
+                bytes.len()
+            ));
+        }
+        
+        let key_start = data_start;
+        let key_end = key_start + (key_len as usize);
+        let value_start = key_end;
+        let value_end = value_start + (value_len as usize);
+        
+        let key = bytes[key_start..key_end].to_vec();
+        let value = bytes[value_start..value_end].to_vec();
+        
+        let mut hasher = Hasher::new();
+        hasher.update(&key_len.to_le_bytes());
+        hasher.update(&value_len.to_le_bytes());
+        hasher.update(&key);
+        hasher.update(&value);
+        let calculated_crc = hasher.finalize();
+        
+        if stored_crc != calculated_crc {
+            return Err(format!(
+                "CRC mismatch: stored {}, calculated {}",
+                stored_crc, calculated_crc
+            ));
+        }
+        
+        Ok(LogRecord { key, value })
+    }
 
     #[test]
     fn test_serialize() {
